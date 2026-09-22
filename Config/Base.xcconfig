@@ -1,0 +1,22 @@
+#include "Version.xcconfig"
+
+PRODUCT_NAME = Write Less
+PRODUCT_BUNDLE_IDENTIFIER = dev.romus.writeless
+
+// The product name has a space, so the Swift module would be Write_Less and
+// crash reports would say Write_Less.AppCoordinator. Keep it aligned with the
+// source folder and the bundle ids instead.
+PRODUCT_MODULE_NAME = Writeless
+
+INFOPLIST_KEY_CFBundleDisplayName = Write Less
+INFOPLIST_KEY_LSUIElement = YES
+INFOPLIST_KEY_LSApplicationCategoryType = public.app-category.productivity
+INFOPLIST_KEY_NSMicrophoneUsageDescription = Write Less listens only while you record, to transcribe your speech on this Mac.
+
+// Release builds are ad-hoc signed by default; pass CODE_SIGN_IDENTITY on the
+// command line (make release SIGN_IDENTITY=...) to use a real identity.
+// Debug builds pick up Config/Local.xcconfig when it exists (make setup-signing).
+CODE_SIGN_STYLE = Manual
+CODE_SIGN_IDENTITY = -
+CODE_SIGN_ENTITLEMENTS = Writeless/Resources/Writeless.entitlements
+ENABLE_HARDENED_RUNTIME = YES

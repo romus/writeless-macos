@@ -1,0 +1,211 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+env:
+  HOMEBREW_TAP_BASE_BRANCH: ${{ vars.HOMEBREW_TAP_BASE_BRANCH != '' && vars.HOMEBREW_TAP_BASE_BRANCH || 'main' }}
+
+jobs:
+  build:
+    runs-on: macos-26
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      sha256: ${{ steps.sha.outputs.sha256 }}
+      changelog: ${{ steps.changelog.outputs.changelog }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Check the tag matches Config/Version.xcconfig
+        id: version
+        run: |
+          TAG="${GITHUB_REF#refs/tags/v}"
+          MADE="$(make version)"
+          if [ "$TAG" != "$MADE" ]; then
+            echo "Tag v$TAG does not match MARKETING_VERSION $MADE" >&2
+            exit 1
+          fi
+          echo "version=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Generate the Xcode project
+        run: |
+          brew install xcodegen
+          make project
+
+      - name: Build and archive
+        run: make zip
+
+      - name: Verify the signature survives the archive
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          mkdir -p "$RUNNER_TEMP/roundtrip"
+          ditto -x -k "build/dist/Writeless-$VERSION.zip" "$RUNNER_TEMP/roundtrip"
+          codesign --verify --strict --verbose=2 "$RUNNER_TEMP/roundtrip/Write Less.app"
+
+      - name: Compute SHA256
+        id: sha
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          SHA=$(shasum -a 256 "build/dist/Writeless-$VERSION.zip" | awk '{print $1}')
+          echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
+          {
+            echo "### SHA256"
+            echo '```'
+            echo "$SHA"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          RANGE="HEAD"
+          [ -n "$PREV_TAG" ] && RANGE="${PREV_TAG}..HEAD"
+          {
+            echo "changelog<<EOF"
+            git log "$RANGE" --pretty=format:"- %s" --no-merges
+            echo ""
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload the archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-archive
+          path: build/dist/Writeless-${{ steps.version.outputs.version }}.zip
+
+      - name: Create the GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/dist/Writeless-${{ steps.version.outputs.version }}.zip
+          body: |
+            ## Write Less v${{ steps.version.outputs.version }}
+
+            ${{ steps.changelog.outputs.changelog }}
+
+            ### Install
+            ```
+            brew tap ${{ vars.HOMEBREW_TAP_REPO }}
+            brew install --cask writeless
+            ```
+
+            ### SHA256
+            ```
+            ${{ steps.sha.outputs.sha256 }}
+            ```
+
+  smoke-test:
+    needs: build
+    runs-on: macos-26
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-archive
+          path: dist
+
+      - name: Render a local cask
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+          SHA256: ${{ needs.build.outputs.sha256 }}
+        run: |
+          ./scripts/render_cask.sh \
+            --version "$VERSION" \
+            --sha256 "$SHA256" \
+            --url "file://${GITHUB_WORKSPACE}/dist/Writeless-${VERSION}.zip" \
+            --output "${RUNNER_TEMP}/writeless.rb"
+
+      - name: Install it from a temporary tap
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+        run: |
+          brew tap-new local/writeless
+          TAP_DIR="$(brew --repository)/Library/Taps/local/homebrew-writeless"
+          mkdir -p "$TAP_DIR/Casks"
+          cp "${RUNNER_TEMP}/writeless.rb" "$TAP_DIR/Casks/writeless.rb"
+          brew install --cask local/writeless/writeless
+
+      - name: Verify the installed app
+        run: |
+          APP="/Applications/Write Less.app"
+          test -d "$APP"
+          test "$(defaults read "$APP/Contents/Info" CFBundleIdentifier)" = "dev.romus.writeless"
+          test "$(defaults read "$APP/Contents/Info" CFBundleExecutable)" = "Write Less"
+          test "$(defaults read "$APP/Contents/Info" CFBundleDisplayName)" = "Write Less"
+          test "$(defaults read "$APP/Contents/Info" LSUIElement)" = "1"
+          codesign --verify --strict "$APP"
+          # The cask drops the quarantine flag; without that Gatekeeper would
+          # block every ad-hoc signed update.
+          ! xattr -p com.apple.quarantine "$APP" 2>/dev/null
+
+      - name: Uninstall
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+        run: brew uninstall --cask --zap local/writeless/writeless
+
+  update-tap:
+    needs: [build, smoke-test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the tap configuration
+        env:
+          HOMEBREW_TAP_REPO: ${{ vars.HOMEBREW_TAP_REPO }}
+          HOMEBREW_TAP_PAT: ${{ secrets.HOMEBREW_TAP_PAT }}
+        run: |
+          test -n "$HOMEBREW_TAP_REPO" || { echo "Repository variable HOMEBREW_TAP_REPO is required." >&2; exit 1; }
+          test -n "$HOMEBREW_TAP_PAT" || { echo "Secret HOMEBREW_TAP_PAT is required." >&2; exit 1; }
+
+      - name: Check out the tap
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.HOMEBREW_TAP_REPO }}
+          token: ${{ secrets.HOMEBREW_TAP_PAT }}
+          ref: ${{ env.HOMEBREW_TAP_BASE_BRANCH }}
+          path: homebrew-tap
+
+      - name: Render the cask
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+          SHA256: ${{ needs.build.outputs.sha256 }}
+        run: |
+          ./scripts/render_cask.sh \
+            --version "$VERSION" \
+            --sha256 "$SHA256" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --output "homebrew-tap/Casks/writeless.rb"
+
+      - name: Open a pull request in the tap
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.HOMEBREW_TAP_PAT }}
+          path: homebrew-tap
+          branch: release/writeless-v${{ needs.build.outputs.version }}
+          base: ${{ env.HOMEBREW_TAP_BASE_BRANCH }}
+          commit-message: "chore: update writeless cask to v${{ needs.build.outputs.version }}"
+          title: "chore: update writeless cask to v${{ needs.build.outputs.version }}"
+          body: |
+            Write Less v${{ needs.build.outputs.version }} (native Swift rewrite).
+
+            - Archive: ${{ github.server_url }}/${{ github.repository }}/releases/download/v${{ needs.build.outputs.version }}/Writeless-${{ needs.build.outputs.version }}.zip
+            - SHA256: `${{ needs.build.outputs.sha256 }}`
+          add-paths: |
+            Casks/writeless.rb

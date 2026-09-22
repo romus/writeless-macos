@@ -1,0 +1,8 @@
+#include "Base.xcconfig"
+
+// A separate identity for development: TCC permissions, the login item and
+// UserDefaults stay separate from an installed release build.
+PRODUCT_BUNDLE_IDENTIFIER = dev.romus.writeless.dev
+INFOPLIST_KEY_CFBundleDisplayName = Write Less Dev
+
+#include? "Local.xcconfig"

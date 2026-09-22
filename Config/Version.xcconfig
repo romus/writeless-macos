@@ -1,0 +1,3 @@
+// Single source of truth for the app version (read by Xcode, the Makefile and CI).
+MARKETING_VERSION = 2.0.0
+CURRENT_PROJECT_VERSION = 1
