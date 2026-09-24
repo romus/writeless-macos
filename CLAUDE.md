@@ -141,6 +141,14 @@ default ⌥⌘Space is "Show Finder search window" on a stock system. Since macO
 settings window closes, the app hides itself (`NSApp.hide`) so focus returns to the
 app the user was typing in; otherwise their own ⌘V lands nowhere.
 
+**The pill over full-screen apps.** It needs all of: an `NSPanel` with `.nonactivatingPanel`
+from `init`, an accessory app, a level of at least `.statusBar`, and `.canJoinAllSpaces` +
+`.fullScreenAuxiliary` — and *not* `.stationary`, which keeps the window with the desktop and
+left the pill on the ordinary Spaces while the user dictated into a full-screen Ghostty. It is
+ordered in again whenever the active Space or the displays change, and placed only when it
+appears, not on every tick, so it does not chase the pointer to another display. The `pill`
+log category records where it was shown and whether the window server actually put it on screen.
+
 **Two names.** The product is "Write Less": `PRODUCT_NAME` and the display names, so the
 bundle is `Write Less.app` and the process is `Write Less` — quote it in `pkill -x`, or it
 silently matches nothing. Everything an identifier hangs off keeps the old spelling on purpose:

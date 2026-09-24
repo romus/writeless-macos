@@ -159,7 +159,14 @@ final class AppCoordinator {
             NotificationCenter.default.addObserver(
                 forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
             ) { [weak self] _ in
-                MainActor.assumeIsolated { self?.pill.refresh() }
+                MainActor.assumeIsolated { self?.pill.reattach() }
+            }
+        )
+        workspaceObservers.append(
+            NSWorkspace.shared.notificationCenter.addObserver(
+                forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.pill.reattach() }
             }
         )
     }
