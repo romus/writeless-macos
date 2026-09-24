@@ -23,7 +23,10 @@ final class PillPanel: NSPanel {
         hasShadow = false // SwiftUI draws the capsule's shadow
         isReleasedWhenClosed = false
         animationBehavior = .none
-        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        // No `.stationary`: it keeps the window with the desktop, and a
+        // full-screen Space shows no desktop, so the pill stayed behind on the
+        // ordinary Spaces while the user dictated into a full-screen terminal.
+        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
         self.contentView = contentView
     }
 
