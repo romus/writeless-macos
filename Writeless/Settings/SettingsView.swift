@@ -84,6 +84,28 @@ struct SettingsView: View {
             }
             Divider()
 
+            if state.paragraphsAvailability.showsRow {
+                SettingsRow(
+                    title: "Paragraphs",
+                    subtitle: state.paragraphsAvailability.subtitle(isOn: preferences.paragraphs)
+                ) {
+                    if let action = state.paragraphsAvailability.actionTitle {
+                        Button(action, action: Permissions.openAppleIntelligenceSettings)
+                            .buttonStyle(.link)
+                    }
+                } control: {
+                    HStack(spacing: 14) {
+                        ParagraphGlyph(isOn: preferences.paragraphs, availability: state.paragraphsAvailability)
+                        Toggle("", isOn: $preferences.paragraphs)
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .disabled(!state.paragraphsAvailability.canToggle)
+                            .opacity(state.paragraphsAvailability.canToggle ? 1 : 0.4)
+                    }
+                }
+                Divider()
+            }
+
             SettingsRow(title: "Sound on finish") {
                 Toggle("", isOn: $preferences.soundOnFinish)
                     .labelsHidden()

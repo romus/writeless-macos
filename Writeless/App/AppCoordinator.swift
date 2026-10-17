@@ -32,6 +32,7 @@ final class AppCoordinator {
     private var lastToggleAt: Date?
     private var modelChangePending = false
     private var monitorTask: Task<Void, Never>?
+    private var availabilityTask: Task<Void, Never>?
     private var deviceListener: AudioDevices.Listener?
     private var isSettingsOpen = false
     private var isMonitoring = false
@@ -48,6 +49,7 @@ final class AppCoordinator {
         preferences.appearance.apply()
         state.shortcut = preferences.shortcut
         state.microphone = Permissions.microphone
+        refreshParagraphsAvailability()
 
         settings = SettingsWindowController(
             preferences: preferences,
@@ -95,6 +97,7 @@ final class AppCoordinator {
         startTask?.cancel()
         noticeTask?.cancel()
         monitorTask?.cancel()
+        availabilityTask?.cancel()
         if let deviceListener {
             AudioDevices.removeListener(deviceListener)
             self.deviceListener = nil
@@ -310,6 +313,7 @@ final class AppCoordinator {
     private func stopAndTranscribe() {
         let model = preferences.model
         let language = preferences.decodingLanguage
+        let paragraphs = preferences.paragraphs
 
         transcriptionStartedAt = Date()
         transcriptionTask = Task { [weak self] in
@@ -342,14 +346,18 @@ final class AppCoordinator {
                 )
                 try Task.checkCancellation()
 
-                let text = TranscriptCleaner.clean(raw, speechSeconds: gate.speechSeconds)
-                guard !text.isEmpty else {
+                let cleaned = TranscriptCleaner.clean(raw, speechSeconds: gate.speechSeconds)
+                guard !cleaned.isEmpty else {
                     finishTranscription(notice: .noSpeechDetected)
                     return
                 }
 
+                let text = await paragraphed(cleaned, enabled: paragraphs)
+                try Task.checkCancellation()
+
                 Clipboard.copy(text)
-                Log.app.info("Copied \(text.count, privacy: .public) characters to the clipboard")
+                let paragraphCount = text.components(separatedBy: "\n\n").count
+                Log.app.info("Copied \(text.count, privacy: .public) characters in \(paragraphCount, privacy: .public) paragraph(s) to the clipboard")
                 if preferences.soundOnFinish { Sounds.playFinished() }
                 finishTranscription(notice: .copiedToClipboard)
             } catch is CancellationError {
@@ -359,6 +367,23 @@ final class AppCoordinator {
                 finishTranscription(notice: .transcriptionFailed)
             }
         }
+    }
+
+    /// Optional in every sense: off by default, skipped when Apple Intelligence
+    /// is not available or the text is too short, and abandoned on any error.
+    /// Whatever happens, the words are Whisper's; only the blank lines are new.
+    private func paragraphed(_ text: String, enabled: Bool) async -> String {
+        guard enabled, ParagraphFormatter.availability == .available else { return text }
+        let (sentences, starts) = await Task.detached(priority: .userInitiated) { () -> ([String], [Int]?) in
+            let sentences = SentenceSplitter.split(text)
+            guard ParagraphLayout.isWorthSplitting(sentences) else {
+                Log.structure.info("Paragraphs skipped: \(sentences.count, privacy: .public) sentences, \(ParagraphLayout.wordCount(sentences), privacy: .public) words")
+                return (sentences, nil)
+            }
+            return (sentences, await ParagraphFormatter.paragraphStarts(for: sentences))
+        }.value
+        guard let starts else { return text }
+        return ParagraphLayout.apply(starts: starts, to: sentences)
     }
 
     private func finishTranscription(notice: Notice) {
@@ -396,6 +421,34 @@ final class AppCoordinator {
     private func settingsWindowChanged(isOpen: Bool) {
         isSettingsOpen = isOpen
         updateMonitoring()
+        updateAvailabilityPolling()
+    }
+
+    // MARK: - Paragraphs
+
+    /// Apple Intelligence can be switched on in System Settings while our
+    /// window is open, and its model takes a while to arrive after that. The
+    /// row catches up by re-reading availability every couple of seconds for
+    /// as long as Settings is showing it; nothing runs otherwise.
+    private func updateAvailabilityPolling() {
+        availabilityTask?.cancel()
+        availabilityTask = nil
+        refreshParagraphsAvailability()
+        guard isSettingsOpen else { return }
+        availabilityTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(2))
+                guard let self, !Task.isCancelled else { return }
+                refreshParagraphsAvailability()
+            }
+        }
+    }
+
+    private func refreshParagraphsAvailability() {
+        let availability = ParagraphFormatter.availability
+        guard availability != state.paragraphsAvailability else { return }
+        Log.structure.info("Paragraphs availability: \(String(describing: availability), privacy: .public)")
+        state.paragraphsAvailability = availability
     }
 
     private func updateMonitoring() {

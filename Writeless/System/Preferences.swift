@@ -38,6 +38,7 @@ final class Preferences {
         static let language = "language"
         static let inputDevice = "inputDevice"
         static let soundOnFinish = "soundOnFinish"
+        static let paragraphs = "paragraphs"
         static let appearance = "appearance"
     }
 
@@ -68,6 +69,12 @@ final class Preferences {
         didSet { defaults.set(soundOnFinish, forKey: Key.soundOnFinish) }
     }
 
+    /// Off by default: it needs Apple Intelligence, and it changes what lands
+    /// on the clipboard, so the user turns it on knowingly.
+    var paragraphs: Bool {
+        didSet { defaults.set(paragraphs, forKey: Key.paragraphs) }
+    }
+
     var appearance: AppearancePreference {
         didSet {
             defaults.set(appearance.rawValue, forKey: Key.appearance)
@@ -86,6 +93,7 @@ final class Preferences {
         inputDevice = (defaults.data(forKey: Key.inputDevice))
             .flatMap { try? JSONDecoder().decode(InputDevice.self, from: $0) }
         soundOnFinish = defaults.object(forKey: Key.soundOnFinish) as? Bool ?? true
+        paragraphs = defaults.bool(forKey: Key.paragraphs)
         appearance = defaults.string(forKey: Key.appearance)
             .flatMap(AppearancePreference.init(rawValue:)) ?? .system
     }

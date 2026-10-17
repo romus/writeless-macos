@@ -23,6 +23,8 @@ final class AppState {
     /// 0...1, for the meter in the Settings microphone row.
     var inputLevel: Float = 0
     var hotkeyStatus: HotkeyStatus = .active
+    /// Whether the Paragraphs row can be used, and why not when it cannot.
+    var paragraphsAvailability: ParagraphsAvailability = .unsupported
     var shortcut: Shortcut = .default
 
     /// Short message shown in the pill, cleared by the coordinator.

@@ -18,7 +18,7 @@ make setup-signing   # write Config/Local.xcconfig from your Apple Development c
 make version         # print MARKETING_VERSION
 ```
 
-Logs: `log show --predicate 'subsystem BEGINSWITH "dev.romus.writeless"' --last 10m --info`
+Logs (zsh has a builtin `log`, hence the path): `/usr/bin/log show --predicate 'subsystem BEGINSWITH "dev.romus.writeless"' --last 10m --info`
 
 ## Architecture
 
@@ -39,19 +39,21 @@ draws the settings rows and the pill.
   `AudioDevices`, the CoreAudio device list and its change notifications. There are
   two `AudioRecorder`s: the dictation, and a `.monitor` one that runs only while
   Settings is open and keeps nothing but the level.
-- **`Writeless/Transcription`** — `ModelStore` (files on disk) and
-  `TranscriptionEngine` (actor around WhisperKit).
+- **`Writeless/Transcription`** — `ModelStore` (files on disk),
+  `TranscriptionEngine` (actor around WhisperKit) and `ParagraphFormatter`, the one
+  place that talks to Apple's Foundation Models.
 - **`Writeless/System`** — permissions, preferences, login item, sounds, logging,
   and the clipboard a transcript ends up on.
 - **`Writeless/Support`** — the Obj-C exception guard, because AVFAudio raises
   where it ought to throw.
 - **`Packages/WritelessCore`** — pure logic, no AppKit and no WhisperKit: shortcut
   model and validation, model, language and input-device catalogs, model folder
-  layout, speech gate, transcript cleaner, level meter, `PhaseMachine`. This is
-  where tests live.
+  layout, speech gate, transcript cleaner, sentence splitter and paragraph layout,
+  level meter, `PhaseMachine`. This is where tests live.
 
 Flow: hotkey → `PhaseMachine.decide` → `AppCoordinator` starts `AudioRecorder` →
 stop → `SpeechGate` → `TranscriptionEngine.transcribe` → `TranscriptCleaner` →
+`ParagraphFormatter` (only with the Paragraphs toggle on and Apple Intelligence available) →
 `Clipboard`. The ⌘V is the user's.
 
 ## Things that will bite you
@@ -91,6 +93,31 @@ behaviours the code depends on:
   re-downloaded afterwards, so `ModelStatus.missing` has to stay escapable: the first
   dictation starts the download, and `downloadPrompt` puts the same action in Settings
   and in the menu.
+
+**Foundation Models (the Paragraphs toggle).** Whisper has no notion of a paragraph, so
+`ParagraphFormatter` asks the on-device Apple Intelligence model (`FoundationModels`, macOS 26+)
+where paragraphs begin. Verified behaviours the code depends on:
+
+- The model only ever sees a numbered list of sentences and answers with sentence numbers
+  (`@Generable`). Asked for the formatted text itself it swapped synonyms in and took five
+  times longer. `ParagraphLayout` rebuilds the text from the original sentences, so
+  the words on the clipboard are always Whisper's.
+- Russian is not in `supportedLanguages`, yet Russian lists are split correctly and no
+  `unsupportedLanguageOrLocale` is thrown. Treat that as luck, not a contract: every failure
+  path ends in the flat transcript.
+- Judgement collapses on long lists (48 sentences came back as 31 paragraphs), hence
+  `ParagraphWindows` of at most 14 sentences, cut to even sizes because every window starts a
+  paragraph. Short paragraphs are glued back by `ParagraphLayout`. `contextSize` is 8192 tokens.
+- `SystemLanguageModel.default.availability` has to be `.available`: Apple Intelligence must be
+  switched on in System Settings (which is only possible when the Mac and Siri language are
+  supported ones; Russian is not), and after switching on the model downloads for a while
+  (`modelNotReady`). Nothing in the app can enable it; `Permissions.openAppleIntelligenceSettings`
+  opens the pane, and the coordinator re-reads availability every two seconds while Settings is
+  open.
+- The target defaults to MainActor isolation, so the `@Generable` struct and the formatter are
+  `nonisolated`; otherwise the macro's generated initialiser is MainActor-isolated and fails to
+  satisfy the protocol. The deployment target stays macOS 14: `FoundationModels` is weak-linked
+  automatically and every use sits behind `#available(macOS 26, *)`.
 
 **Never hand `installTap` a format you read yourself.**
 `installTap(onBus:bufferSize:format:)` compares the format it is given against what
