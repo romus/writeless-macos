@@ -15,7 +15,9 @@ import FoundationModels
 /// `@Generable` macro's generated initialiser has to satisfy a nonisolated
 /// protocol requirement, which it cannot do from a MainActor-isolated type.
 nonisolated enum ParagraphFormatter {
-    /// Covers every window of a long dictation; past it the flat text goes out.
+    /// Per window: a dictation has one or two, an hour-long file dozens, and
+    /// each gets its own budget. A window that overruns it sends the flat
+    /// text out.
     static let timeout: Duration = .seconds(10)
 
     /// Read fresh every time: the user can flip Apple Intelligence in System
@@ -47,7 +49,7 @@ nonisolated enum ParagraphFormatter {
         guard #available(macOS 26, *) else { return nil }
         let startedAt = Date()
         do {
-            let starts = try await withTimeout(timeout) { try await requestStarts(for: sentences) }
+            let starts = try await requestStarts(for: sentences)
             let elapsed = Int(Date().timeIntervalSince(startedAt) * 1000)
             Log.structure.info("Paragraphs: \(sentences.count, privacy: .public) sentences → starts \(String(describing: starts), privacy: .public) in \(elapsed, privacy: .public) ms")
             return starts
@@ -88,13 +90,16 @@ nonisolated enum ParagraphFormatter {
             let numbered = sentences[window].enumerated()
                 .map { "\($0.offset + 1). \($0.element)" }
                 .joined(separator: "\n")
-            let session = LanguageModelSession(model: .default, instructions: instructions)
-            let response = try await session.respond(
-                to: numbered,
-                generating: Paragraphing.self,
-                options: GenerationOptions(temperature: 0)
-            )
-            starts += response.content.paragraphStarts.map { $0 + window.lowerBound }
+            let windowStarts: [Int] = try await withTimeout(timeout) {
+                let session = LanguageModelSession(model: .default, instructions: instructions)
+                let response = try await session.respond(
+                    to: numbered,
+                    generating: Paragraphing.self,
+                    options: GenerationOptions(temperature: 0)
+                )
+                return response.content.paragraphStarts
+            }
+            starts += windowStarts.map { $0 + window.lowerBound }
             try Task.checkCancellation()
         }
         return starts

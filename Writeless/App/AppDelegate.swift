@@ -23,4 +23,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         coordinator?.showSettings()
         return true
     }
+
+    /// `open -a "Write Less" recording.m4a`: the same path as a drop on the
+    /// menu bar icon.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        coordinator?.transcribeFiles(urls)
+    }
 }

@@ -40,6 +40,8 @@ final class Preferences {
         static let soundOnFinish = "soundOnFinish"
         static let paragraphs = "paragraphs"
         static let appearance = "appearance"
+        static let transcriptDestination = "transcriptDestination"
+        static let customTranscriptFolder = "customTranscriptFolder"
     }
 
     @ObservationIgnored private let defaults: UserDefaults
@@ -75,6 +77,19 @@ final class Preferences {
         didSet { defaults.set(paragraphs, forKey: Key.paragraphs) }
     }
 
+    /// Where a file's transcript goes: next to the recording unless told otherwise.
+    var transcriptDestination: TranscriptDestination {
+        didSet {
+            defaults.set(try? JSONEncoder().encode(transcriptDestination), forKey: Key.transcriptDestination)
+        }
+    }
+
+    /// The folder last picked with "Choose Folder…", kept so the popup still
+    /// lists it after the user switches to another option.
+    var customTranscriptFolder: String? {
+        didSet { defaults.set(customTranscriptFolder, forKey: Key.customTranscriptFolder) }
+    }
+
     var appearance: AppearancePreference {
         didSet {
             defaults.set(appearance.rawValue, forKey: Key.appearance)
@@ -96,6 +111,9 @@ final class Preferences {
         paragraphs = defaults.bool(forKey: Key.paragraphs)
         appearance = defaults.string(forKey: Key.appearance)
             .flatMap(AppearancePreference.init(rawValue:)) ?? .system
+        transcriptDestination = (defaults.data(forKey: Key.transcriptDestination))
+            .flatMap { try? JSONDecoder().decode(TranscriptDestination.self, from: $0) } ?? .nextToRecording
+        customTranscriptFolder = defaults.string(forKey: Key.customTranscriptFolder)
     }
 
     var model: WhisperModel { WhisperModelCatalog.model(forPreference: modelID) }

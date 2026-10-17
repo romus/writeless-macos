@@ -30,6 +30,10 @@ final class AppState {
     /// Short message shown in the pill, cleared by the coordinator.
     var notice: Notice?
 
+    /// The file being transcribed, if any. Independent of `phase`: a dictation
+    /// can run alongside it.
+    var fileJob: FileTranscriptionProgress?
+
     var isRecording: Bool { phase == .starting || phase == .recording }
     var isAudioFlowing: Bool { phase == .recording }
 

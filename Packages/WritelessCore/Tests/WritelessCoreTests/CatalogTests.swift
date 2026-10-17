@@ -71,6 +71,14 @@ struct FormattingTests {
         #expect(ClockFormat.elapsed(seconds) == expected)
     }
 
+    @Test(
+        "A position in a file shows hours only once it needs them",
+        arguments: [(0.0, "0:00"), (1832.0, "30:32"), (3600.0, "1:00:00"), (4360.0, "1:12:40"), (-3.0, "0:00")]
+    )
+    func duration(seconds: Double, expected: String) {
+        #expect(ClockFormat.duration(seconds) == expected)
+    }
+
     @Test("Download progress reads in megabytes and never overshoots")
     func bytes() {
         #expect(ByteFormat.progress(downloaded: 312_000_000, total: 626_718_238) == "312 of 627 MB")

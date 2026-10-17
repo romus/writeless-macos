@@ -83,7 +83,7 @@ struct AdvancedSection: View {
     /// wait out a first Neural Engine specialization, which cannot be cancelled
     /// and runs for minutes.
     private var canClear: Bool {
-        guard state.phase == .idle else { return false }
+        guard state.phase == .idle, state.fileJob == nil else { return false }
         switch state.modelStatus {
         case .downloading, .preparing: return false
         case .ready, .missing, .failed: break

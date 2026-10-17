@@ -82,6 +82,13 @@ actor TranscriptionEngine {
         return results.map(\.text).joined(separator: " ")
     }
 
+    /// Waits for `model` to be loaded, starting its download and load if
+    /// nothing has. The file job calls this before starting its clock, so a
+    /// download is not counted as transcription time.
+    func ensureReady(_ model: WhisperModel) async throws {
+        _ = try await readyKit(for: model)
+    }
+
     func unload() async {
         abandonPreparation()
         await kit?.unloadModels()

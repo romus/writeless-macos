@@ -10,6 +10,10 @@ public enum Notice: Sendable, Equatable {
     case modelPreparing
     case modelUnavailable
     case transcriptionFailed
+    /// A file's transcript was written; the name is the `.md` it ended up as.
+    case transcriptSaved(String)
+    case fileUnreadable
+    case transcriptNotSaved
 
     public var text: String {
         switch self {
@@ -20,6 +24,9 @@ public enum Notice: Sendable, Equatable {
         case .modelPreparing: "Preparing model…"
         case .modelUnavailable: "Model unavailable"
         case .transcriptionFailed: "Transcription failed"
+        case .transcriptSaved(let name): "Saved \(name)"
+        case .fileUnreadable: "Couldn't read the audio file"
+        case .transcriptNotSaved: "Couldn't save the transcript"
         }
     }
 
@@ -32,6 +39,9 @@ public enum Notice: Sendable, Equatable {
         case .modelPreparing: "hourglass"
         case .modelUnavailable: "exclamationmark.triangle"
         case .transcriptionFailed: "exclamationmark.triangle"
+        case .transcriptSaved: "doc.text"
+        case .fileUnreadable: "exclamationmark.triangle"
+        case .transcriptNotSaved: "exclamationmark.triangle"
         }
     }
 }
