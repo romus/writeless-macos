@@ -12,6 +12,7 @@ struct SettingsActions {
     var refreshModelCacheSize: () -> Void = {}
     var clearModelCache: () -> Void = {}
     var hotkeyRecordingChanged: (Bool) -> Void = { _ in }
+    var chooseTranscriptFolder: () -> Void = {}
 }
 
 struct SettingsView: View {
@@ -106,6 +107,26 @@ struct SettingsView: View {
                 Divider()
             }
 
+            SettingsRow(
+                title: "Save files to",
+                subtitle: preferences.transcriptDestination.settingsSubtitle(home: home)
+            ) {
+                Picker("", selection: destinationSelection) {
+                    Text(TranscriptDestination.nextToRecording.popupTitle).tag(DestinationTag.nextToRecording)
+                    Text(TranscriptDestination.documents.popupTitle).tag(DestinationTag.documents)
+                    if let folder = preferences.customTranscriptFolder {
+                        Text(TranscriptDestination.custom(path: folder).popupTitle).tag(DestinationTag.custom)
+                    }
+                    Divider()
+                    Text("Choose Folder…").tag(DestinationTag.choose)
+                }
+                .labelsHidden()
+                .lineLimit(1)
+                // Folder names can be long, like microphone names.
+                .frame(maxWidth: 208, alignment: .trailing)
+            }
+            Divider()
+
             SettingsRow(title: "Sound on finish") {
                 Toggle("", isOn: $preferences.soundOnFinish)
                     .labelsHidden()
@@ -170,6 +191,42 @@ struct SettingsView: View {
                     remembered: preferences.inputDevice
                 )
                 actions.inputDeviceChanged()
+            }
+        )
+    }
+
+    private enum DestinationTag: Hashable {
+        case nextToRecording, documents, custom, choose
+    }
+
+    private var home: URL { FileManager.default.homeDirectoryForCurrentUser }
+
+    /// "Choose Folder…" is an action in a popup's clothing: picking it opens
+    /// the panel and stores nothing until the user confirms a folder. The
+    /// coordinator re-assigns the preference on cancel, which snaps the popup
+    /// back.
+    private var destinationSelection: Binding<DestinationTag> {
+        Binding(
+            get: {
+                switch preferences.transcriptDestination {
+                case .nextToRecording: .nextToRecording
+                case .documents: .documents
+                case .custom: .custom
+                }
+            },
+            set: { tag in
+                switch tag {
+                case .nextToRecording:
+                    preferences.transcriptDestination = .nextToRecording
+                case .documents:
+                    preferences.transcriptDestination = .documents
+                case .custom:
+                    if let folder = preferences.customTranscriptFolder {
+                        preferences.transcriptDestination = .custom(path: folder)
+                    }
+                case .choose:
+                    actions.chooseTranscriptFolder()
+                }
             }
         )
     }

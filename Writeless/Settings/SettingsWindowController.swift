@@ -16,6 +16,11 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         super.init()
     }
 
+    /// The window while it is up: a folder panel attaches to it as a sheet.
+    var visibleWindow: NSWindow? {
+        window?.isVisible == true ? window : nil
+    }
+
     func show() {
         let window = self.window ?? makeWindow()
         self.window = window

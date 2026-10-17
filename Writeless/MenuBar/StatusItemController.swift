@@ -10,6 +10,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     var onRetryDownload: (() -> Void)?
     var onOpenSettings: (() -> Void)?
     var onOpenMicrophoneSettings: (() -> Void)?
+    var onTranscribeFile: (() -> Void)?
+    var onCancelFile: (() -> Void)?
 
     private(set) var isMenuOpen = false
 
@@ -22,6 +24,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private let cancelItem = NSMenuItem()
     private let retryItem = NSMenuItem()
     private let microphoneItem = NSMenuItem()
+    private let fileProgressItem = NSMenuItem()
+    private let fileProgressView = FileProgressMenuView()
+    private let cancelFileItem = NSMenuItem()
+    private let transcribeFileItem = NSMenuItem()
 
     /// Reassigning the label on every tick would restate it to VoiceOver.
     private var lastAccessibilityLabel: String?
@@ -59,6 +65,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         configure(retryItem, title: "Retry Download", action: #selector(retryTapped))
         configure(microphoneItem, title: "Open Microphone Settings…", action: #selector(microphoneTapped))
 
+        fileProgressItem.view = fileProgressView
+        fileProgressItem.isEnabled = false
+        configure(cancelFileItem, title: "Cancel File Transcription", action: #selector(cancelFileTapped))
+        configure(transcribeFileItem, title: "Transcribe File…", action: #selector(transcribeFileTapped))
+
         let settingsItem = NSMenuItem()
         configure(settingsItem, title: "Settings…", action: #selector(settingsTapped))
 
@@ -68,8 +79,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         quitItem.keyEquivalentModifierMask = [.command]
 
         menu.addItem(headerItem)
+        menu.addItem(fileProgressItem)
+        menu.addItem(cancelFileItem)
         menu.addItem(toggleItem)
         menu.addItem(cancelItem)
+        menu.addItem(transcribeFileItem)
         menu.addItem(retryItem)
         menu.addItem(microphoneItem)
         menu.addItem(settingsItem)
@@ -90,8 +104,17 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         let indicator = state.indicator
         let dotColor = dotColor(for: indicator)
 
-        statusItem?.button?.image = icon
+        statusItem?.button?.image = StatusIcon.image(symbol: symbolName, progress: state.fileJob?.fraction)
         applyAccessibilityLabel(for: indicator)
+
+        if let job = state.fileJob {
+            fileProgressView.update(job, now: Date())
+            fileProgressItem.isHidden = false
+            cancelFileItem.isHidden = false
+        } else {
+            fileProgressItem.isHidden = true
+            cancelFileItem.isHidden = true
+        }
 
         if let header {
             headerItem.attributedTitle = attributedHeader(header, dotColor: dotColor)
@@ -115,23 +138,18 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         microphoneItem.isHidden = state.microphone != .denied
     }
 
-    private var icon: NSImage? {
-        let symbol: String
+    private var symbolName: String {
         switch state.phase {
         case .starting, .recording:
-            symbol = "mic.fill"
+            return "mic.fill"
         case .transcribing:
-            symbol = "waveform"
+            return "waveform"
         case .idle:
             if state.microphone == .denied {
-                symbol = "mic.slash"
-            } else {
-                symbol = state.modelStatus.idleSymbolName ?? "mic"
+                return "mic.slash"
             }
+            return state.modelStatus.idleSymbolName ?? "mic"
         }
-        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Write Less")
-        image?.isTemplate = true
-        return image
     }
 
     private var header: String? {
@@ -150,8 +168,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         switch state.hotkeyStatus {
         case .active:
             // The design's status row. Only while everything is actually ready:
-            // a missing model leaves the header out, as it always has.
-            return state.indicator == .ready ? "Ready" : nil
+            // a missing model leaves the header out, as it always has, and a
+            // file job puts its own block there instead.
+            return state.indicator == .ready && state.fileJob == nil ? "Ready" : nil
         case .takenBySystem:
             return "\(state.shortcut.displayString) is used by macOS"
         case .takenByAnotherApp:
@@ -170,7 +189,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 
     private func applyAccessibilityLabel(for indicator: StatusIndicator) {
-        let label = indicator.accessibilityDescription.map { "Write Less — \($0)" } ?? "Write Less"
+        var label = indicator.accessibilityDescription.map { "Write Less — \($0)" } ?? "Write Less"
+        if state.fileJob != nil, state.phase == .idle { label = "Write Less — Transcribing file" }
         guard label != lastAccessibilityLabel else { return }
         lastAccessibilityLabel = label
         statusItem?.button?.setAccessibilityLabel(label)
@@ -214,5 +234,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     @objc private func retryTapped() { onRetryDownload?() }
     @objc private func settingsTapped() { onOpenSettings?() }
     @objc private func microphoneTapped() { onOpenMicrophoneSettings?() }
+    @objc private func transcribeFileTapped() { onTranscribeFile?() }
+    @objc private func cancelFileTapped() { onCancelFile?() }
     @objc private func quitTapped() { NSApp.terminate(nil) }
 }

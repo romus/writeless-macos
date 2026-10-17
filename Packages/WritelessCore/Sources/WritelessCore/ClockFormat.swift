@@ -6,6 +6,15 @@ public enum ClockFormat {
         let total = Int(max(0, seconds.rounded(.down)))
         return "\(total / 60):\(String(format: "%02d", total % 60))"
     }
+
+    /// "1:12:40", or "30:32" under an hour — a position inside an audio file.
+    public static func duration(_ seconds: Double) -> String {
+        let total = Int(max(0, seconds.rounded(.down)))
+        guard total >= 3600 else { return elapsed(seconds) }
+        let minutes = String(format: "%02d", total % 3600 / 60)
+        let rest = String(format: "%02d", total % 60)
+        return "\(total / 3600):\(minutes):\(rest)"
+    }
 }
 
 /// "312 of 627 MB" — the model download readout.

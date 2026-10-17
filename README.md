@@ -22,6 +22,9 @@ Write Less asks for one permission on first launch:
 
 - **Microphone** — to record.
 
+Saving a file transcript into Documents, Desktop or Downloads asks once more, for
+that folder.
+
 The speech model (about 630 MB) downloads on first launch. Loading it the first time
 also compiles it for the Neural Engine, which can take a few minutes; later launches
 take seconds. The menu shows the progress.
@@ -34,6 +37,11 @@ take seconds. The menu shows the progress.
   recording, and it never takes focus, so you can keep typing.
 - The transcript goes to the clipboard; press ⌘V to paste it. Write Less never types
   for you, so a transcript can't land somewhere you didn't expect.
+- **Audio files.** Pick "Transcribe File…" from the menu and choose a recording (m4a,
+  mp3, wav…); `open -a "Write Less" recording.m4a` does the same. The text is written
+  next to the recording as `recording.md` (an existing file is never overwritten:
+  `recording 2.md`), the menu shows the progress, and dictation keeps working
+  meanwhile. Several files are transcribed one after another.
 
 If ⌥⌘Space does nothing, macOS is probably still using it for "Show Finder search
 window": Settings shows "Used by a macOS shortcut" — pick another shortcut, or turn
@@ -48,6 +56,8 @@ Open them from the menu.
 | Shortcut | Click, then press a combination. Esc cancels. ⌥-only combinations are refused: macOS never delivers them. |
 | Model | Tiny (77 MB), Base (147 MB), Small (486 MB), Medium (1.5 GB), Large (627 MB, large-v3-turbo — the default, and the best quality for its size). |
 | Language | Automatic detection, or a fixed language when detection keeps guessing wrong on short phrases. |
+| Paragraphs | Splits a long transcript into paragraphs with Apple Intelligence (macOS 26, Apple silicon). Off by default. |
+| Save files to | Where file transcripts go: next to the recording (falling back to `~/Documents/Writeless` when the recording lives under `~/Library`, in a temporary folder or somewhere read-only), `~/Documents/Writeless`, or a folder of your choice. |
 | Sound on finish | Plays the system "Glass" sound when a transcript is ready. |
 | Launch at login | Managed through macOS login items. |
 | Appearance | Light, Dark or System. |
@@ -56,6 +66,7 @@ Open them from the menu.
 Files:
 
 - Models: `~/Library/Application Support/Writeless/Models`
+- File transcripts: next to the recording, or `~/Documents/Writeless`
 - Preferences: `defaults read dev.romus.writeless`
 - Logs: `log show --predicate 'subsystem BEGINSWITH "dev.romus.writeless"' --last 10m --info`
 

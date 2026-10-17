@@ -29,7 +29,8 @@ draws the settings rows and the pill.
   `AppState` (`@Observable`, everything the UI reads), `AppCoordinator` (wires
   everything, performs the side effects of the state machine).
 - **`Writeless/MenuBar`** — status item and its menu; items are created once and
-  shown or hidden per state.
+  shown or hidden per state. `FileProgressMenuView` is the progress block in the
+  menu, `StatusIcon` draws the glyph with a progress line under it.
 - **`Writeless/Settings`** — window controller plus the SwiftUI rows and the
   shortcut recorder.
 - **`Writeless/Pill`** — non-activating `NSPanel` with the recording capsule.
@@ -38,23 +39,35 @@ draws the settings rows and the pill.
 - **`Writeless/Audio`** — `AVAudioEngine` capture, resampled to 16 kHz mono, plus
   `AudioDevices`, the CoreAudio device list and its change notifications. There are
   two `AudioRecorder`s: the dictation, and a `.monitor` one that runs only while
-  Settings is open and keeps nothing but the level.
+  Settings is open and keeps nothing but the level. `AudioFileReader` decodes an
+  audio file to the same 16 kHz mono, a stretch at a time.
 - **`Writeless/Transcription`** — `ModelStore` (files on disk),
-  `TranscriptionEngine` (actor around WhisperKit) and `ParagraphFormatter`, the one
-  place that talks to Apple's Foundation Models.
+  `TranscriptionEngine` (actor around WhisperKit), `FileTranscriber` (the piecewise
+  loop over an audio file) and `ParagraphFormatter`, the one place that talks to
+  Apple's Foundation Models.
 - **`Writeless/System`** — permissions, preferences, login item, sounds, logging,
-  and the clipboard a transcript ends up on.
+  the clipboard a dictation ends up on, `TranscriptWriter` for the `.md` a file ends
+  up as, and `FilePanels`, the two open panels.
 - **`Writeless/Support`** — the Obj-C exception guard, because AVFAudio raises
   where it ought to throw.
 - **`Packages/WritelessCore`** — pure logic, no AppKit and no WhisperKit: shortcut
   model and validation, model, language and input-device catalogs, model folder
   layout, speech gate, transcript cleaner, sentence splitter and paragraph layout,
-  level meter, `PhaseMachine`. This is where tests live.
+  level meter, `PhaseMachine`, and for files `PauseFinder`, `FileTranscriptionProgress`
+  and `TranscriptDestination`. This is where tests live.
 
 Flow: hotkey → `PhaseMachine.decide` → `AppCoordinator` starts `AudioRecorder` →
 stop → `SpeechGate` → `TranscriptionEngine.transcribe` → `TranscriptCleaner` →
 `ParagraphFormatter` (only with the Paragraphs toggle on and Apple Intelligence available) →
 `Clipboard`. The ⌘V is the user's.
+
+Files: "Transcribe File…" or `open -a` → `AppCoordinator.enqueueFiles`
+→ `FileTranscriber` reads ~150 s stretches through `AudioFileReader`, cuts each at the
+longest pause in its last 30 s (`PauseFinder`), gates it (`SpeechGate`), pads it with 2 s of
+silence and hands it to the same `TranscriptionEngine.transcribe` → `TranscriptCleaner` →
+`ParagraphFormatter` → `TranscriptWriter` writes `Name.md` next to the recording. The job
+is `AppState.fileJob`, orthogonal to `PhaseMachine`: a dictation can run alongside, and
+several files queue up.
 
 ## Things that will bite you
 
@@ -118,6 +131,36 @@ where paragraphs begin. Verified behaviours the code depends on:
   `nonisolated`; otherwise the macro's generated initialiser is MainActor-isolated and fails to
   satisfy the protocol. The deployment target stays macOS 14: `FoundationModels` is weak-linked
   automatically and every use sits behind `#available(macOS 26, *)`.
+
+**File transcription.** Things verified while building it:
+
+- WhisperKit's `VADAudioChunker` (used for any array longer than 30 s) drops whatever
+  follows its last cut when that is a second or less. Every piece gets 2 s of zeros
+  appended (`FileTranscriber.tailPaddingSeconds`) so a real remainder is always longer.
+- WhisperKit's `.incremental` file loading exists but is not used: it decodes chunks
+  one at a time, and reports position only through the instance-level
+  `segmentDiscoveryCallback`, which a concurrent dictation would feed too. Progress
+  comes from piece completion instead, which is why the file loop is ours.
+- `FileTranscriber` is an actor on purpose. With `SWIFT_APPROACHABLE_CONCURRENCY` a
+  `nonisolated async` function runs on its caller's actor, and the caller is the
+  main one.
+- `AudioFileReader` must answer `.endOfStream` from the converter's input block at EOF,
+  or the resampler never flushes its tail. The recorder deliberately never does that.
+- No drag-and-drop onto the status item, although the design asked for it. It was built
+  (a transparent subview over `NSStatusBarButton`, forwarding `mouseDown`) and removed:
+  dragging a file up to the menu bar triggers macOS's own hot edge and brings up
+  Mission Control, so the drop never reaches the item. The menu item and `open -a` are
+  the ways in.
+- The drawing handler of a composed `NSImage` can run on any thread; `StatusIcon` is
+  `nonisolated` and the handler captures only a symbol name and a number.
+- Writing into Documents, Desktop or Downloads triggers the one-time folder consent
+  prompt (the usage strings are in `Config/Base.xcconfig`). The write runs in a detached
+  task so the prompt never blocks the main actor.
+- `ParagraphFormatter`'s 10 s timeout is per window, not per transcript: an hour of
+  speech is dozens of windows, and a single budget for all of them meant a long file
+  always fell back to flat text.
+- Cancelling a file job takes effect at the end of the piece in flight: the VAD path
+  swallows cancellation, and `engine.transcribe` only checks it afterwards.
 
 **Never hand `installTap` a format you read yourself.**
 `installTap(onBus:bufferSize:format:)` compares the format it is given against what

@@ -9,6 +9,7 @@ final class AppCoordinator {
     private let preferences = Preferences()
     private let store = ModelStore()
     private let engine: TranscriptionEngine
+    private let fileTranscriber: FileTranscriber
     private let recorder = AudioRecorder()
     /// A second capture, kept alive only while Settings is open, so the
     /// microphone row can show whether the chosen input is hearing anything.
@@ -36,9 +37,14 @@ final class AppCoordinator {
     private var deviceListener: AudioDevices.Listener?
     private var isSettingsOpen = false
     private var isMonitoring = false
+    /// The file job in flight, and the files waiting behind it. Independent of
+    /// the dictation phase: both can run at once.
+    private var fileTask: Task<Void, Never>?
+    private var fileQueue: [URL] = []
 
     init() {
         engine = TranscriptionEngine(store: store)
+        fileTranscriber = FileTranscriber(engine: engine)
         statusItem = StatusItemController(state: state)
         pill = PillController(state: state)
     }
@@ -66,7 +72,8 @@ final class AppCoordinator {
                 retryModelDownload: { [weak self] in self?.prepareModel() },
                 refreshModelCacheSize: { [weak self] in self?.refreshModelCacheSize() },
                 clearModelCache: { [weak self] in self?.clearModelCache() },
-                hotkeyRecordingChanged: { [weak self] isRecording in self?.setHotkeySuspended(isRecording) }
+                hotkeyRecordingChanged: { [weak self] isRecording in self?.setHotkeySuspended(isRecording) },
+                chooseTranscriptFolder: { [weak self] in self?.chooseTranscriptFolder() }
             )
         )
 
@@ -89,6 +96,10 @@ final class AppCoordinator {
         settings?.show()
     }
 
+    func transcribeFiles(_ urls: [URL]) {
+        enqueueFiles(urls)
+    }
+
     func shutDown() {
         tickTimer?.invalidate()
         engineTask?.cancel()
@@ -98,6 +109,8 @@ final class AppCoordinator {
         noticeTask?.cancel()
         monitorTask?.cancel()
         availabilityTask?.cancel()
+        fileQueue.removeAll()
+        fileTask?.cancel()
         if let deviceListener {
             AudioDevices.removeListener(deviceListener)
             self.deviceListener = nil
@@ -124,6 +137,8 @@ final class AppCoordinator {
         statusItem.onRetryDownload = { [weak self] in self?.prepareModel() }
         statusItem.onOpenSettings = { [weak self] in self?.settings?.show() }
         statusItem.onOpenMicrophoneSettings = { Permissions.openMicrophoneSettings() }
+        statusItem.onTranscribeFile = { [weak self] in self?.chooseFiles() }
+        statusItem.onCancelFile = { [weak self] in self?.cancelFileJob() }
     }
 
     private func wireRecorder() {
@@ -403,6 +418,128 @@ final class AppCoordinator {
         startRequestedAt = nil
     }
 
+    // MARK: - Files
+
+    /// The open panel and `open -a` both end up here. A job already running
+    /// keeps going; the new files wait their turn.
+    private func enqueueFiles(_ urls: [URL]) {
+        guard !urls.isEmpty else { return }
+        fileQueue += urls
+        Log.files.info("Queued \(urls.count, privacy: .public) file(s) for transcription")
+        startNextFile()
+    }
+
+    private func chooseFiles() {
+        FilePanels.chooseAudioFiles { [weak self] urls in
+            guard let self else { return }
+            enqueueFiles(urls)
+            // Same rule as closing Settings: give focus back, or the user's
+            // next ⌘V lands nowhere.
+            if !isSettingsOpen { NSApp.hide(nil) }
+        }
+    }
+
+    private func chooseTranscriptFolder() {
+        let current = preferences.customTranscriptFolder.map { URL(filePath: $0, directoryHint: .isDirectory) }
+        FilePanels.chooseFolder(current: current, sheetOn: settings?.visibleWindow) { [weak self] url in
+            guard let self else { return }
+            if let url {
+                let path = url.path(percentEncoded: false)
+                preferences.customTranscriptFolder = path
+                preferences.transcriptDestination = .custom(path: path)
+                Log.files.info("Transcripts go to \(path, privacy: .public)")
+            } else {
+                // Observation counts an equal value as a change, which is what
+                // snaps the popup back from "Choose Folder…".
+                preferences.transcriptDestination = preferences.transcriptDestination
+            }
+        }
+    }
+
+    private func startNextFile() {
+        guard fileTask == nil, !fileQueue.isEmpty else { return }
+        let url = fileQueue.removeFirst()
+        let model = preferences.model
+        let language = preferences.decodingLanguage
+        let paragraphs = preferences.paragraphs
+        let destination = preferences.transcriptDestination
+
+        state.fileJob = FileTranscriptionProgress(fileName: url.lastPathComponent)
+        refreshUI()
+
+        fileTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let output = try await fileTranscriber.transcribe(
+                    file: url, model: model, language: language
+                ) { [weak self] event in
+                    Task { @MainActor in self?.fileJobAdvanced(event) }
+                }
+                try Task.checkCancellation()
+
+                let cleaned = TranscriptCleaner.clean(output.text, speechSeconds: output.speechSeconds)
+                guard !cleaned.isEmpty else {
+                    finishFile(url, notice: .noSpeechDetected)
+                    return
+                }
+
+                state.fileJob?.isFormatting = true
+                refreshUI()
+                let text = await paragraphed(cleaned, enabled: paragraphs)
+                try Task.checkCancellation()
+
+                // Off the main actor: the first write into Documents or
+                // Downloads brings up the system's consent prompt.
+                let saved = try await Task.detached(priority: .userInitiated) {
+                    try TranscriptWriter.save(text, for: url, destination: destination)
+                }.value
+                let paragraphCount = text.components(separatedBy: "\n\n").count
+                let folder = saved.deletingLastPathComponent().path(percentEncoded: false)
+                Log.files.info("Saved \(saved.lastPathComponent, privacy: .public) (\(text.count, privacy: .public) characters, \(paragraphCount, privacy: .public) paragraph(s)) to \(folder, privacy: .public)")
+                if preferences.soundOnFinish { Sounds.playFinished() }
+                finishFile(url, notice: .transcriptSaved(saved.lastPathComponent))
+            } catch is CancellationError {
+                Log.files.info("File transcription cancelled: \(url.lastPathComponent, privacy: .public)")
+                finishFile(url, notice: nil)
+            } catch let error as AudioFileReader.ReadError {
+                Log.files.error("Could not read \(url.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                finishFile(url, notice: .fileUnreadable)
+            } catch let error as TranscriptWriter.WriteError {
+                Log.files.error("\(error.localizedDescription, privacy: .public)")
+                finishFile(url, notice: .transcriptNotSaved)
+            } catch {
+                Log.files.error("File transcription failed: \(error.localizedDescription, privacy: .public)")
+                finishFile(url, notice: .transcriptionFailed)
+            }
+        }
+    }
+
+    private func fileJobAdvanced(_ event: FileTranscriber.Event) {
+        switch event {
+        case .opened(let totalSeconds): state.fileJob?.totalSeconds = totalSeconds
+        case .started: state.fileJob?.startedAt = Date()
+        case .advanced(let doneSeconds): state.fileJob?.doneSeconds = doneSeconds
+        }
+        // With the menu closed nothing else repaints the icon's progress line.
+        refreshUI()
+    }
+
+    private func finishFile(_ url: URL, notice: Notice?) {
+        fileTask = nil
+        state.fileJob = nil
+        if let notice { show(notice) }
+        applyPendingModelChange()
+        refreshUI()
+        startNextFile()
+    }
+
+    /// Stops the current file and forgets the ones waiting. The engine notices
+    /// at the end of the piece it is on, so the block can linger a few seconds.
+    private func cancelFileJob() {
+        fileQueue.removeAll()
+        fileTask?.cancel()
+    }
+
     // MARK: - Microphone
 
     /// Applies to whatever is running: an in-flight dictation moves to the new
@@ -482,10 +619,11 @@ final class AppCoordinator {
     // MARK: - Model
 
     private func prepareModel() {
-        guard state.phase == .idle else {
+        guard state.phase == .idle, state.fileJob == nil else {
             // Swapping the pipeline mid-transcription would kill it, and
             // swapping it mid-recording would make the stop wait for a fresh
-            // download before it could transcribe anything.
+            // download before it could transcribe anything. A file job holds
+            // it for the same reason, piece after piece.
             modelChangePending = true
             return
         }
@@ -510,7 +648,7 @@ final class AppCoordinator {
     /// minutes later, long after the user confirmed it, is a bug. Settings
     /// disables the button off-idle too.
     private func clearModelCache() {
-        guard state.phase == .idle else { return }
+        guard state.phase == .idle, state.fileJob == nil else { return }
         Task { [weak self] in
             await self?.engine.clearCache()
             self?.refreshModelCacheSize()
@@ -699,7 +837,7 @@ final class AppCoordinator {
         default: isModelBusy = false
         }
 
-        if state.phase != .idle || isModelBusy {
+        if state.phase != .idle || isModelBusy || state.fileJob != nil {
             guard activity == nil else { return }
             activity = ProcessInfo.processInfo.beginActivity(
                 options: [.userInitiated], reason: "Recording and transcribing"

@@ -12,6 +12,10 @@ INFOPLIST_KEY_CFBundleDisplayName = Write Less
 INFOPLIST_KEY_LSUIElement = YES
 INFOPLIST_KEY_LSApplicationCategoryType = public.app-category.productivity
 INFOPLIST_KEY_NSMicrophoneUsageDescription = Write Less listens only while you record, to transcribe your speech on this Mac.
+INFOPLIST_KEY_NSDocumentsFolderUsageDescription = Write Less saves transcripts of your recordings here.
+INFOPLIST_KEY_NSDesktopFolderUsageDescription = Write Less saves transcripts of your recordings here.
+INFOPLIST_KEY_NSDownloadsFolderUsageDescription = Write Less saves transcripts of your recordings here.
+INFOPLIST_KEY_NSRemovableVolumesUsageDescription = Write Less saves transcripts of your recordings here.
 
 // Release builds are ad-hoc signed by default; pass CODE_SIGN_IDENTITY on the
 // command line (make release SIGN_IDENTITY=...) to use a real identity.
