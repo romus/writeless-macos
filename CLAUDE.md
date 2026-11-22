@@ -242,9 +242,11 @@ whatever the user was typing. Bringing it back brings all three problems with it
   a development build never shares permissions or preferences with an installed one.
 - Tagging `v*` runs `.github/workflows/release.yml`: build, archive, GitHub release,
   install smoke test through a temporary tap, then a pull request against the
-  Homebrew tap.
+  shared tap `romus/homebrew-tap` through its bump action
+  (`romus/homebrew-tap/.github/actions/bump`). The cask template is
+  `scripts/render_cask.sh`; the tap's own copy is never edited by hand.
 - Releases are ad-hoc signed. Their signature changes every build, so Homebrew cannot
   carry the Gatekeeper approval forward and the cask drops the quarantine flag in
-  `postflight`. Switching to a stable identity (`SIGN_IDENTITY=…`) makes the
+  `postflight_steps`. Switching to a stable identity (`SIGN_IDENTITY=…`) makes the
   Gatekeeper approval and the Microphone grant survive upgrades; remove the
-  `postflight` block then.
+  `postflight_steps` block then.

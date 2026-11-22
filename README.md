@@ -14,7 +14,8 @@ Version 2 is a native Swift rewrite. [Version 1](https://github.com/romus/writel
 ## Install
 
 ```bash
-brew tap romus/writeless
+brew tap romus/tap
+brew trust romus/tap
 brew install --cask writeless
 ```
 

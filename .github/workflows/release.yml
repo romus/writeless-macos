@@ -5,9 +5,6 @@ on:
     tags:
       - "v*"
 
-env:
-  HOMEBREW_TAP_BASE_BRANCH: ${{ vars.HOMEBREW_TAP_BASE_BRANCH != '' && vars.HOMEBREW_TAP_BASE_BRANCH || 'main' }}
-
 jobs:
   build:
     runs-on: macos-26
@@ -96,7 +93,8 @@ jobs:
 
             ### Install
             ```
-            brew tap ${{ vars.HOMEBREW_TAP_REPO }}
+            brew tap romus/tap
+            brew trust romus/tap
             brew install --cask writeless
             ```
 
@@ -136,6 +134,8 @@ jobs:
           TAP_DIR="$(brew --repository)/Library/Taps/local/homebrew-writeless"
           mkdir -p "$TAP_DIR/Casks"
           cp "${RUNNER_TEMP}/writeless.rb" "$TAP_DIR/Casks/writeless.rb"
+          # Homebrew 7 refuses to load casks from a tap nobody has trusted.
+          brew trust local/writeless
           brew install --cask local/writeless/writeless
 
       - name: Verify the installed app
@@ -166,22 +166,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check the tap configuration
-        env:
-          HOMEBREW_TAP_REPO: ${{ vars.HOMEBREW_TAP_REPO }}
-          HOMEBREW_TAP_PAT: ${{ secrets.HOMEBREW_TAP_PAT }}
-        run: |
-          test -n "$HOMEBREW_TAP_REPO" || { echo "Repository variable HOMEBREW_TAP_REPO is required." >&2; exit 1; }
-          test -n "$HOMEBREW_TAP_PAT" || { echo "Secret HOMEBREW_TAP_PAT is required." >&2; exit 1; }
-
-      - name: Check out the tap
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ vars.HOMEBREW_TAP_REPO }}
-          token: ${{ secrets.HOMEBREW_TAP_PAT }}
-          ref: ${{ env.HOMEBREW_TAP_BASE_BRANCH }}
-          path: homebrew-tap
-
       - name: Render the cask
         env:
           VERSION: ${{ needs.build.outputs.version }}
@@ -191,21 +175,16 @@ jobs:
             --version "$VERSION" \
             --sha256 "$SHA256" \
             --repo "${GITHUB_REPOSITORY}" \
-            --output "homebrew-tap/Casks/writeless.rb"
+            --output "${RUNNER_TEMP}/writeless.rb"
 
-      - name: Open a pull request in the tap
-        uses: peter-evans/create-pull-request@v7
+      - name: Open a pull request in romus/homebrew-tap
+        uses: romus/homebrew-tap/.github/actions/bump@main
         with:
           token: ${{ secrets.HOMEBREW_TAP_PAT }}
-          path: homebrew-tap
-          branch: release/writeless-v${{ needs.build.outputs.version }}
-          base: ${{ env.HOMEBREW_TAP_BASE_BRANCH }}
-          commit-message: "chore: update writeless cask to v${{ needs.build.outputs.version }}"
-          title: "chore: update writeless cask to v${{ needs.build.outputs.version }}"
+          type: cask
+          name: writeless
+          version: ${{ needs.build.outputs.version }}
+          file: ${{ runner.temp }}/writeless.rb
           body: |
-            Write Less v${{ needs.build.outputs.version }} (native Swift rewrite).
-
             - Archive: ${{ github.server_url }}/${{ github.repository }}/releases/download/v${{ needs.build.outputs.version }}/Writeless-${{ needs.build.outputs.version }}.zip
             - SHA256: `${{ needs.build.outputs.sha256 }}`
-          add-paths: |
-            Casks/writeless.rb
