@@ -72,6 +72,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
         let settingsItem = NSMenuItem()
         configure(settingsItem, title: "Settings…", action: #selector(settingsTapped))
+        settingsItem.keyEquivalent = ","
+        settingsItem.keyEquivalentModifierMask = [.command]
 
         let quitItem = NSMenuItem()
         configure(quitItem, title: "Quit", action: #selector(quitTapped))
