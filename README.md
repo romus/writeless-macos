@@ -50,7 +50,7 @@ the system one off in System Settings → Keyboard → Keyboard Shortcuts.
 
 ## Settings
 
-Open them from the menu.
+Open them from the menu, or press ⌘, while it is open.
 
 | Setting | Notes |
 |---|---|
