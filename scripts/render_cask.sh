@@ -49,8 +49,8 @@ ${URL_LINE}
   desc "On-device speech-to-text from the menu bar"
   homepage "${HOMEPAGE}"
 
-  depends_on macos: ">= :sonoma"
   depends_on arch: :arm64
+  depends_on macos: :sonoma
 
   app "Write Less.app"
 
@@ -58,9 +58,8 @@ ${URL_LINE}
   # build and Homebrew cannot carry the Gatekeeper approval across upgrades.
   # Without this, every update means another trip to Privacy & Security.
   # Remove this block once releases are signed with a stable identity.
-  postflight do
-    system_command "/usr/bin/xattr",
-                   args: ["-dr", "com.apple.quarantine", "#{appdir}/Write Less.app"]
+  postflight_steps do
+    run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{appdir}}/Write Less.app"]
   end
 
   uninstall quit: "dev.romus.writeless"
